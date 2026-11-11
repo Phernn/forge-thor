@@ -87,6 +87,7 @@ public class Main extends AndroidApplication {
 
     private AndroidAdapter Gadapter;
     private ThorSecondaryScreen secondaryScreen; //dual-screen handhelds (e.g. AYN Thor bottom screen)
+    private android.content.BroadcastReceiver controllerHook; //adb-driven controller simulator for testing
     private ArrayList<String> gamepads;
     private AndroidClipboard androidClipboard;
     private boolean isMIUI;
@@ -232,6 +233,11 @@ public class Main extends AndroidApplication {
         } catch (Exception e) {
             netLog.warn("[dualscreen] unavailable: {}", e.toString());
             secondaryScreen = null;
+        }
+        try {
+            controllerHook = AndroidControllerHook.register(this);
+        } catch (Exception e) {
+            netLog.warn("[controllerhook] unavailable: {}", e.toString());
         }
         Gadapter = new AndroidAdapter(getContext());
         String cpu = "";
@@ -594,6 +600,13 @@ public class Main extends AndroidApplication {
         }
         if (secondaryScreen != null) {
             secondaryScreen.onDestroy();
+        }
+        if (controllerHook != null) {
+            try {
+                unregisterReceiver(controllerHook);
+            } catch (IllegalArgumentException ignored) {
+            }
+            controllerHook = null;
         }
         triggerDispose();
         super.onDestroy();

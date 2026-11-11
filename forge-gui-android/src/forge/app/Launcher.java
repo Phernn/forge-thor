@@ -1,11 +1,13 @@
 package forge.app;
 
 import android.app.Activity;
+import android.app.ActivityOptions;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.Display;
 import forge.gui.GuiBase;
 
 import java.io.BufferedReader;
@@ -18,7 +20,17 @@ public class Launcher extends Activity {
         super.onCreate(savedInstanceState);
         Intent main = new Intent(Launcher.this, Main.class);
         main.setFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-        startActivity(main);
+        //dual-screen handhelds (e.g. AYN Thor): when started from the second screen's launcher, run on the main
+        //screen anyway, so the second screen stays free for the bottom panel
+        int displayId = getWindowManager().getDefaultDisplay().getDisplayId();
+        if (displayId != Display.DEFAULT_DISPLAY) {
+            main.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ActivityOptions options = ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(Display.DEFAULT_DISPLAY);
+            startActivity(main, options.toBundle());
+        } else {
+            startActivity(main);
+        }
 
         Intent intent = getIntent();
         sendIntent(intent, intent.getAction(), intent.getType());

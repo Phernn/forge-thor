@@ -110,13 +110,16 @@ public class ThorSecondaryScreen implements ISecondaryScreen {
         if (displayManager == null) {
             return null;
         }
-        Display[] presentationDisplays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
-        if (presentationDisplays.length > 0) {
-            return presentationDisplays[0];
+        //never the display the game itself is on (it can be launched from the second screen)
+        int ownId = activity.getWindowManager().getDefaultDisplay().getDisplayId();
+        for (Display d : displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)) {
+            if (d.getDisplayId() != ownId && d.isValid()) {
+                return d;
+            }
         }
         //some devices expose a built-in second screen without the presentation category
         for (Display d : displayManager.getDisplays()) {
-            if (d.getDisplayId() != Display.DEFAULT_DISPLAY && d.isValid()) {
+            if (d.getDisplayId() != ownId && d.getDisplayId() != Display.DEFAULT_DISPLAY && d.isValid()) {
                 return d;
             }
         }

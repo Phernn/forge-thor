@@ -4,6 +4,7 @@ import forge.Graphics;
 import forge.assets.FSkinTexture;
 import forge.screens.match.CardFlightOverlay;
 import forge.screens.match.MatchScreen;
+import forge.screens.match.TargetingOverlay;
 import forge.toolbox.FContainer;
 import forge.toolbox.FDisplayObject;
 
@@ -68,5 +69,7 @@ public class VBottomScreen extends FContainer {
         g.drawLine(1, MatchScreen.getBorderColor(), 0, y, getWidth(), y);
         //animations of the local player's cards happen here; the top screen draws everyone else's
         CardFlightOverlay.draw(g, playerPanel.getPlayer(), getHeight(), playerPanel.getPlayer(), false);
+        //the bottom part of targeting and combat arrows that cross over from the top display
+        TargetingOverlay.drawBottomArrows(g);
     }
 }

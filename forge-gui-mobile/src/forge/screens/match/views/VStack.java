@@ -355,10 +355,17 @@ public class VStack extends FDropDown {
         }
     }
 
-    //skips a target that is hidden: off screen, or behind this stack or another open menu (see TargetingOverlay.isVisible)
-    private static void drawTargetArrow(final Graphics g, final Vector2 from, final Vector2 to, final TargetingOverlay.ArcConnection connects) {
-        if (to == null || !TargetingOverlay.isVisible(to.x, to.y)) { return; }
-        TargetingOverlay.drawArrow(g, from, to, connects);
+    //skips a target that is hidden: off screen, or behind this stack or another open menu (see TargetingOverlay.isVisible);
+    //a target on the bottom display of a dual-screen device gets an arrow that crosses over to it
+    private static void drawTargetArrow(final Graphics g, final Vector2 from, final FDisplayObject target, final Vector2 to, final TargetingOverlay.ArcConnection connects) {
+        TargetingOverlay.drawArrowAcross(g, from, MatchScreen.toArrowPoint(target, to), connects);
+    }
+
+    //dual-screen hides the opponents that are not picked; their card panels keep the last on-screen position, so an
+    //arrow to them would point at whatever the shown opponent has in that spot now
+    private static boolean isPlayerPanelShown(final PlayerView player) {
+        final VPlayerPanel panel = player == null ? null : MatchScreen.getPlayerPanel(player);
+        return panel != null && panel.isVisible();
     }
 
     @Override
@@ -380,13 +387,15 @@ public class VStack extends FDropDown {
             StackItemView instance = activeStackInstance;
             while (instance != null) {
                 for (CardView c : instance.getTargetCards()) {
+                    if (!isPlayerPanelShown(c.getController())) { continue; }
                     TargetingOverlay.ArcConnection conn = activator != null && activator.isOpponentOf(c.getController()) ? TargetingOverlay.ArcConnection.FoesStackTargeting : TargetingOverlay.ArcConnection.FriendsStackTargeting;
-                    drawTargetArrow(g, arrowOrigin, VCardDisplayArea.CardAreaPanel.get(c).getTargetingArrowOrigin(), conn);
+                    final VCardDisplayArea.CardAreaPanel cardPanel = VCardDisplayArea.CardAreaPanel.get(c);
+                    drawTargetArrow(g, arrowOrigin, cardPanel, cardPanel.getTargetingArrowOrigin(), conn);
                 }
                 for (PlayerView p : instance.getTargetPlayers()) {
                     TargetingOverlay.ArcConnection conn = activator != null && activator.isOpponentOf(p) ? TargetingOverlay.ArcConnection.FoesStackTargeting : TargetingOverlay.ArcConnection.FriendsStackTargeting;
                     final VPlayerPanel panel = MatchScreen.getPlayerPanel(p);
-                    if (panel != null) { drawTargetArrow(g, arrowOrigin, panel.getAvatar().getTargetingArrowOrigin(), conn); }
+                    if (panel != null && panel.isVisible()) { drawTargetArrow(g, arrowOrigin, panel.getAvatar(), panel.getAvatar().getTargetingArrowOrigin(), conn); }
                 }
 
                 // Stack items aimed at other stack items (counterspells and the like) point at that item's entry in this view.

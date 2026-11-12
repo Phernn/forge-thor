@@ -119,9 +119,109 @@ public class TargetingOverlay {
     private static final ArrayList<PendingArrow> pendingArrows = new ArrayList<>(); // reused every frame (UI thread only)
     private static int pendingCount = 0;
 
+    // ---- dual-screen: arrows between the top and the bottom display ----
+    // A point on the bottom display is given in "table" coordinates: the top display's coordinates carried on past its
+    // lower edge, as if both screens lay flat on one surface. An arrow that crosses is drawn whole on each display in that
+    // display's own coordinates, and each display cuts off the part beyond its edges, so the two parts meet at the hinge.
+    // The physical layout is an ESTIMATE until measured on a device (AYN Thor): the bottom screen is centred under the
+    // top one, BOTTOM_WIDTH_SHARE of its width, below a gap of HINGE_GAP_SHARE of the top screen's height.
+    private static final float BOTTOM_WIDTH_SHARE = 0.57f; // ~2.96" bottom vs ~5.23" top screen width
+    private static final float HINGE_GAP_SHARE = 0.25f;
+    private static boolean dualLayout = false;
+    private static float tableTop, tableLeft, tableScale; // bottom (x, y) -> table (tableLeft + x * s, tableTop + y * s)
+
+    private static final class CrossArrow {
+        float x1, y1, x2, y2;
+        ArcConnection connects;
+        boolean solid;
+    }
+    private static final ArrayList<CrossArrow> crossArrows = new ArrayList<>(); // reused every frame (UI thread only)
+    private static int crossCount = 0;
+    private static long crossFrame = -1;
+
+    /** Dual-screen: where the bottom display sits relative to the top one; called once per frame by the match screen. */
+    public static void setDualScreenLayout(final float topWidth, final float topHeight, final float bottomWidth) {
+        if (topWidth <= 0 || topHeight <= 0 || bottomWidth <= 0) {
+            dualLayout = false;
+            return;
+        }
+        tableScale = topWidth * BOTTOM_WIDTH_SHARE / bottomWidth;
+        tableLeft = (topWidth - bottomWidth * tableScale) / 2;
+        tableTop = topHeight * (1 + HINGE_GAP_SHARE);
+        dualLayout = true;
+    }
+
+    public static void clearDualScreenLayout() {
+        dualLayout = false;
+    }
+
+    /** Dual-screen: a point on the bottom display, in table coordinates (see above). */
+    public static Vector2 toTable(final Vector2 bottomPoint) {
+        if (bottomPoint == null || !dualLayout) { return null; }
+        return new Vector2(tableLeft + bottomPoint.x * tableScale, tableTop + bottomPoint.y * tableScale);
+    }
+
+    /** True for a table point that lies on the bottom display. */
+    public static boolean isOnBottom(final Vector2 p) {
+        return dualLayout && p != null && p.y >= tableTop;
+    }
+
+    //remembers an arrow touching the bottom display, so the bottom display can draw its part after the top one was drawn
+    private static void recordCross(final Vector2 start, final Vector2 end, final ArcConnection connects, final boolean solid) {
+        final long frame = com.badlogic.gdx.Gdx.graphics.getFrameId();
+        if (frame != crossFrame) { //first arrow of a new frame: drop the last frame's
+            crossFrame = frame;
+            crossCount = 0;
+        }
+        final CrossArrow a;
+        if (crossCount < crossArrows.size()) {
+            a = crossArrows.get(crossCount);
+        } else {
+            a = new CrossArrow();
+            crossArrows.add(a);
+        }
+        a.x1 = start.x;
+        a.y1 = start.y;
+        a.x2 = end.x;
+        a.y2 = end.y;
+        a.connects = connects;
+        a.solid = solid;
+        crossCount++;
+    }
+
+    /**
+     * For arrows that may touch the bottom display: false if an end on the top display is hidden; otherwise records the
+     * arrow for the bottom display when an end is on it, and returns whether the top display has a part to draw.
+     */
+    private static boolean routeArrow(final Vector2 start, final Vector2 end, final ArcConnection connects, final boolean solid, final boolean checkStart) {
+        final boolean startBottom = isOnBottom(start), endBottom = isOnBottom(end);
+        if (checkStart && !startBottom && !isVisible(start.x, start.y)) { return false; }
+        if (!endBottom && !isVisible(end.x, end.y)) { return false; }
+        if (startBottom || endBottom) {
+            recordCross(start, end, connects, solid);
+        }
+        return !(startBottom && endBottom);
+    }
+
+    /** Dual-screen: draws this frame's parts of the arrows that reach the bottom display; called by the bottom display. */
+    public static void drawBottomArrows(final Graphics g) {
+        if (!dualLayout || crossFrame != com.badlogic.gdx.Gdx.graphics.getFrameId() || crossCount == 0) { return; }
+        final int count = crossCount;
+        final String style = FModel.getPreferences().getPref(ForgePreferences.FPref.UI_ARROW_OPTION);
+        final Vector2 start = new Vector2(), end = new Vector2();
+        g.drawArrowBatch(() -> {
+            for (int i = 0; i < count; i++) {
+                final CrossArrow a = crossArrows.get(i);
+                start.set((a.x1 - tableLeft) / tableScale, (a.y1 - tableTop) / tableScale);
+                end.set((a.x2 - tableLeft) / tableScale, (a.y2 - tableTop) / tableScale);
+                drawArrowStyled(g, start, end, a.connects, style, a.solid);
+            }
+        });
+    }
+
     private static void queueArrow(final Vector2 start, final Vector2 end, final ArcConnection connects, final boolean solid) {
         if (start == null || end == null) { return; }
-        if (!isVisible(start.x, start.y) || !isVisible(end.x, end.y)) { return; } // hidden, off screen or covered
+        if (!routeArrow(start, end, connects, solid, true)) { return; } // hidden, off screen, covered, or only on the bottom display
         final PendingArrow a;
         if (pendingCount < pendingArrows.size()) {
             a = pendingArrows.get(pendingCount);
@@ -244,7 +344,7 @@ public class TargetingOverlay {
                 for (final CardView attackingCard : blockInfoAttackers) {
                     for (final PlayerView p : playerViewSet) {
                         if (attackersOfPlayer.get(p).contains(attackingCard)) {
-                            final Vector2 vPlayer = MatchScreen.getPlayerPanel(p).getAvatar().getTargetingArrowOrigin();
+                            final Vector2 vPlayer = MatchScreen.getAvatarArrowPoint(p);
                             // solid = true: the old repeated drawing stacked the translucent 0.8/0.9 alphas up to fully opaque,
                             // so drawing once at full alpha keeps the same look. Pass false for the intended translucent look.
                             queueArrow(endpoints.get(attackingCard.getId()), vPlayer, ArcConnection.FoesAttacking, true);
@@ -263,6 +363,18 @@ public class TargetingOverlay {
     public static void drawArrow(final Graphics g, final Vector2 start, final Vector2 end, final ArcConnection connects) {
         if (start == null || end == null) { return; }
         drawArrowStyled(g, start, end, connects, FModel.getPreferences().getPref(ForgePreferences.FPref.UI_ARROW_OPTION), false);
+    }
+
+    /**
+     * Like {@link #drawArrow}, but either end may be on the bottom display (a table point from {@link #toTable}):
+     * the top display draws its part now, the bottom display draws the rest. Skips the arrow if the end is hidden on the
+     * top display; the start is not checked (the stack draws its arrows from on top of itself, which counts as covered).
+     */
+    public static void drawArrowAcross(final Graphics g, final Vector2 start, final Vector2 end, final ArcConnection connects) {
+        if (start == null || end == null) { return; }
+        if (routeArrow(start, end, connects, false, false)) {
+            drawArrow(g, start, end, connects);
+        }
     }
 
     /**

@@ -1007,6 +1007,27 @@ public class MatchScreen extends FScreen {
         return bottomScreen != null && bottomScreen.isAncestorOf(object);
     }
 
+    /**
+     * A point for a targeting arrow to or from this display object: on the bottom display of a dual-screen device it
+     * is turned into table coordinates (see {@link TargetingOverlay#toTable}), so the arrow can cross between displays.
+     */
+    public static Vector2 toArrowPoint(FDisplayObject owner, Vector2 point) {
+        final MatchScreen view = MatchController.getView();
+        if (point == null || view == null || !view.dualScreen || !view.isOnBottomDisplay(owner)) {
+            return point;
+        }
+        return TargetingOverlay.toTable(point);
+    }
+
+    /** Where arrows to this player's avatar end, or null if the player has no panel. */
+    public static Vector2 getAvatarArrowPoint(PlayerView player) {
+        final VPlayerPanel panel = getPlayerPanel(player);
+        if (panel == null) {
+            return null;
+        }
+        return toArrowPoint(panel.getAvatar(), panel.getAvatar().getTargetingArrowOrigin());
+    }
+
     private static float moveLeftOfObstacle(Rectangle obstacle, float x, float y, float w, float h, Rectangle anchor, float left) {
         if (obstacle.width <= 0 || x >= obstacle.x + obstacle.width || x + w <= obstacle.x
                 || y >= obstacle.y + obstacle.height || y + h <= obstacle.y) {
@@ -1021,6 +1042,11 @@ public class MatchScreen extends FScreen {
     private void updateArrowVisibility() {
         final Rectangle area = scroller.screenPos;
         TargetingOverlay.setVisibleArea(area.x, area.y, area.width, area.height);
+        if (dualScreen && bottomScreen.getWidth() > 0) {
+            TargetingOverlay.setDualScreenLayout(Forge.getScreenWidth(), Forge.getScreenHeight(), bottomScreen.getWidth());
+        } else {
+            TargetingOverlay.clearDualScreenLayout();
+        }
         TargetingOverlay.clearOccluders();
         if (topPlayerPrompt != null) { return; } //two players on one device: the stack is rotated, so its rect would be wrong
         for (final FDropDown dropDown : arrowOccluders) {
@@ -1062,25 +1088,28 @@ public class MatchScreen extends FScreen {
 
                 final VPlayerPanel playerPanel = getPlayerPanel(p);
                 if (playerPanel == null || !playerPanelsList.contains(playerPanel)) continue;
-                if (!isShownOnPrimary(playerPanel)) continue; //on the other display, or a hidden opponent
+                //dual-screen: the bottom player's cards are on the other display; their arrows cross over to it
+                final boolean onBottom = dualScreen && playerPanel == bottomPlayerPanel;
+                if (!onBottom && !isShownOnPrimary(playerPanel)) continue; //a hidden opponent
                 playerViewSet.add(p);
 
                 final FCollectionView<CardView> battlefield = p.getBattlefield();
                 if (battlefield.isEmpty()) continue;
 
-                final float left = playerPanel.getField().getLeft();
-                final float right = playerPanel.getField().getRight();
+                final Rectangle field = playerPanel.getField().screenPos;
+                final float left = onBottom ? field.x : playerPanel.getField().getLeft();
+                final float right = onBottom ? field.x + field.width : playerPanel.getField().getRight();
 
                 if (netGame) {
                     // network games need the thread-safe iterator
                     for (CardView c : battlefield.threadSafeIterable()) {
-                        collectEndpoint(c, inCombat, left, right);
+                        collectEndpoint(c, inCombat, left, right, onBottom);
                     }
                 } else {
                     // standard O(1) index
                     final int bfSize = battlefield.size();
                     for (int j = 0; j < bfSize; j++) {
-                        collectEndpoint(battlefield.get(j), inCombat, left, right);
+                        collectEndpoint(battlefield.get(j), inCombat, left, right, onBottom);
                     }
                 }
             }
@@ -1091,13 +1120,19 @@ public class MatchScreen extends FScreen {
         } catch (Exception ignored) {}
     }
 
-    private void collectEndpoint(CardView c, boolean inCombat, float left, float right) {
+    private void collectEndpoint(CardView c, boolean inCombat, float left, float right, boolean onBottom) {
         if (c == null) return;
         if (!inCombat && !hasArrowRelation(c)) return;
         final CardAreaPanel panel = CardAreaPanel.get(c);
         if (panel == null) return;
-        final Vector2 origin = panel.getTargetingArrowOrigin();
-        if (origin == null || origin.x < left || origin.x > right || !TargetingOverlay.isVisible(origin.x, origin.y)) return;
+        Vector2 origin = panel.getTargetingArrowOrigin();
+        if (origin == null || origin.x < left || origin.x > right) return;
+        if (onBottom) {
+            origin = TargetingOverlay.toTable(origin); //bottom display -> table coordinates (see TargetingOverlay)
+            if (origin == null) return;
+        } else if (!TargetingOverlay.isVisible(origin.x, origin.y)) {
+            return;
+        }
         endpoints.put(c.getId(), origin);
         cardsonBattlefield.add(c);
     }

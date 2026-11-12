@@ -28,6 +28,7 @@ import com.badlogic.gdx.Gdx;
 import forge.assets.FSkinFont;
 import forge.toolbox.FLabel;
 import forge.toolbox.FContainer;
+import forge.util.ThreadUtil;
 import forge.util.Utils;
 import forge.util.collect.FCollectionView;
 import org.apache.commons.lang3.tuple.Pair;
@@ -50,6 +51,8 @@ import forge.game.phase.PhaseType;
 import forge.game.player.PlayerView;
 import forge.game.zone.ZoneType;
 import forge.gamemodes.match.YieldController;
+import forge.gamemodes.match.input.InputAttack;
+import forge.gamemodes.match.input.InputQueue;
 import forge.gui.GuiBase;
 import forge.interfaces.IGameController;
 import forge.localinstance.properties.ForgePreferences;
@@ -61,6 +64,7 @@ import forge.menu.FMenuItem;
 import forge.menu.FMenuTab;
 import forge.model.FModel;
 import forge.player.AutoYieldStore.TriggerDecision;
+import forge.player.PlayerControllerHuman;
 import forge.player.PlayerZoneUpdate;
 import forge.screens.FScreen;
 import forge.screens.match.views.VCardDisplayArea.CardAreaPanel;
@@ -565,6 +569,26 @@ public class MatchScreen extends FScreen {
                 buttons.get(i).setBounds(i * w, 0, w, height);
             }
         }
+    }
+
+    /**
+     * Controller: while declaring attackers, switching to an opponent with L1 also makes them the player being attacked
+     * (the same as tapping their avatar). Only during that step, so cycling players never picks a player as a target.
+     */
+    private void selectDefenderForAttack(final PlayerView player) {
+        if (player == null || player == bottomPlayerPanel.getPlayer()) {
+            return;
+        }
+        final IGameController controller = getGameController();
+        if (!(controller instanceof PlayerControllerHuman)) {
+            return;
+        }
+        final InputQueue inputQueue = ((PlayerControllerHuman) controller).getInputQueue();
+        ThreadUtil.invokeInGameThread(() -> {
+            if (inputQueue.getInput() instanceof InputAttack) {
+                controller.selectPlayer(player, null);
+            }
+        });
     }
 
     private IGameController getGameController() {
@@ -1254,6 +1278,7 @@ public class MatchScreen extends FScreen {
                     if (dualScreen) {
                         setShownOpponent(selectedPlayerPanel());
                     }
+                    selectDefenderForAttack(selectedPlayerPanel().getPlayer());
                     //selectedPlayerPanel().setNextSelectedTab(true);
                 }
                 break;
